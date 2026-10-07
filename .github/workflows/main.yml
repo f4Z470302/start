@@ -1,1 +1,111 @@
+name: Build 5K+ Medicines Dataset
 
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/main.yml"
+      - "medicine-dataset/requirements.txt"
+      - "medicine-dataset/scripts/**"
+      - "medicine-dataset/tests/**"
+  workflow_dispatch:
+    inputs:
+      min_rows:
+        description: "Minimum validated medicine rows"
+        required: false
+        default: "5000"
+        type: string
+  schedule:
+    - cron: "17 2 * * 0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: medicine-dataset
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MIN_ROWS: ${{ github.event.inputs.min_rows || '5000' }}
+      MAX_ROWS: "10000"
+      REQUEST_DELAY_SECONDS: "1.0"
+      SOURCE_BASE: "https://www.1mg.com"
+      SOURCE_NAME: "tata_1mg"
+      OUT_CSV: "medicine-dataset/data/medicines_dataset.csv"
+      SCRAPER_USER_AGENT: "MedicineDatasetResearch/1.0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r medicine-dataset/requirements.txt
+
+      - name: Run tests
+        working-directory: medicine-dataset
+        run: python -m unittest discover -s tests -v
+
+      - name: Build 5K+ medicine CSV
+        working-directory: medicine-dataset
+        run: python scripts/build_dataset.py --min-rows "$MIN_ROWS"
+
+      - name: Validate generated CSV
+        run: |
+          python - <<'PY'
+          import os
+          import pandas as pd
+          from pathlib import Path
+
+          path = Path("medicine-dataset/data/medicines_dataset.csv")
+          assert path.exists(), f"Missing output: {path}"
+
+          df = pd.read_csv(path)
+          required = [
+              "id", "name", "brand", "manufacturer", "price_inr", "mrp_inr",
+              "currency", "rating", "review_count", "category",
+              "salt_composition", "dosage_form", "pack_size",
+              "prescription_required", "uses", "source", "source_url",
+              "scraped_at"
+          ]
+
+          missing = [c for c in required if c not in df.columns]
+          assert not missing, f"Missing columns: {missing}"
+          assert len(df) >= int(os.environ["MIN_ROWS"])
+          assert df["id"].notna().all() and df["id"].is_unique
+          assert df["source_url"].notna().all() and df["source_url"].is_unique
+          assert df["name"].notna().all()
+          assert (pd.to_numeric(df["price_inr"], errors="coerce") > 0).all()
+
+          print(f"Validated {len(df)} medicine rows and {len(df.columns)} columns.")
+          print(df.head(3).to_string(index=False))
+          PY
+
+      - name: Upload CSV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: medicines-dataset-${{ github.run_number }}
+          path: medicine-dataset/data/medicines_dataset.csv
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit generated CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add medicine-dataset/data/medicines_dataset.csv
+          if git diff --cached --quiet; then
+            echo "CSV is unchanged; nothing to commit."
+          else
+            git commit -m "data: refresh medicines dataset"
+            git push origin main
+          fi
