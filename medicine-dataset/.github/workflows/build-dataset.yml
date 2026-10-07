@@ -1,5 +1,8 @@
 name: Build 5k+ medicines dataset
 on:
+  push:
+    paths:
+      - 'medicine-dataset/**'
   workflow_dispatch:
     inputs:
       min_rows:
