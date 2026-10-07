@@ -32,7 +32,7 @@ jobs:
     env:
       MIN_ROWS: ${{ github.event.inputs.min_rows || '5000' }}
       MAX_ROWS: "10000"
-      REQUEST_DELAY_SECONDS: "1.0"
+      REQUEST_DELAY_SECONDS: "0.2"
       SOURCE_BASE: "https://www.1mg.com"
       SOURCE_NAME: "tata_1mg"
       OUT_CSV: "data/medicines_dataset.csv"
