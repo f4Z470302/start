@@ -90,19 +90,64 @@ def fetch(url):
             time.sleep(2**n)
 
 def discover():
-    rr=requests.get(urljoin(BASE,"/robots.txt"),headers=HEAD,timeout=30); rr.raise_for_status()
-    rp=RobotFileParser(); rp.parse(rr.text.splitlines())
-    urls=[]
-    seeds=re.findall(r"(?im)^\s*Sitemap:\s*(\S+)",rr.text) or [urljoin(BASE,"/sitemap.xml")]
-    for sm in seeds:
+    robots_url = urljoin(BASE, "/robots.txt")
+    rr = requests.get(robots_url, headers=HEAD, timeout=30)
+    rr.raise_for_status()
+    rp = RobotFileParser()
+    rp.parse(rr.text.splitlines())
+
+    seeds = re.findall(r"(?im)^\s*Sitemap:\s*(\S+)", rr.text)
+    seeds = [s for s in seeds if urlparse(s).netloc.lower() == urlparse(BASE).netloc.lower()]
+
+    candidates = []
+    for seed in seeds:
+        name = seed.lower()
+        if "/drug" in name or "/medicine" in name or "/otc" in name or "/product" in name:
+            candidates.append(seed)
+
+    candidates.extend([
+        urljoin(BASE, "/sitemap.xml"),
+        urljoin(BASE, "/sitemap_index.xml"),
+        urljoin(BASE, "/sitemap/sitemap.xml"),
+    ])
+
+    urls = []
+    visited = set()
+
+    def read_sitemap(sm, depth=0):
+        if sm in visited or depth > 3 or len(urls) >= MAX_ROWS * 5:
+            return
+        visited.add(sm)
         try:
-            x=requests.get(sm,headers=HEAD,timeout=30); x.raise_for_status(); root=ET.fromstring(x.content)
-            for u in root.iter():
-                if u.tag.rsplit("}",1)[-1]=="loc" and u.text:
-                    v=u.text.strip()
-                    if urlparse(v).netloc.lower()==urlparse(BASE).netloc.lower() and rp.can_fetch(UA,v):
-                        if SOURCE!="tata_1mg" or "/drugs/" in v or "/otc/" in v: urls.append(v)
-        except Exception as e: print("sitemap warning",e)
+            x = requests.get(sm, headers=HEAD, timeout=30)
+            if x.status_code == 404:
+                return
+            x.raise_for_status()
+            root = ET.fromstring(x.content)
+            root_type = root.tag.rsplit("}", 1)[-1]
+
+            for node in root:
+                tag = node.tag.rsplit("}", 1)[-1]
+                if tag == "sitemap":
+                    for child in node:
+                        if child.tag.rsplit("}", 1)[-1] == "loc" and child.text:
+                            read_sitemap(child.text.strip(), depth + 1)
+                elif tag == "url":
+                    for child in node:
+                        if child.tag.rsplit("}", 1)[-1] == "loc" and child.text:
+                            v = child.text.strip()
+                            if urlparse(v).netloc.lower() != urlparse(BASE).netloc.lower():
+                                continue
+                            if not rp.can_fetch(UA, v):
+                                continue
+                            if SOURCE != "tata_1mg" or "/drugs/" in v or "/otc/" in v:
+                                urls.append(v)
+        except Exception as e:
+            print("sitemap warning", sm, e)
+
+    for seed in dict.fromkeys(candidates):
+        read_sitemap(seed)
+
     return list(dict.fromkeys(urls))
 
 def main():
