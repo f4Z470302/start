@@ -17,13 +17,17 @@ UA=os.getenv("SCRAPER_USER_AGENT","MedicineDatasetResearch/1.0")
 HEAD={"User-Agent":UA,"Accept-Language":"en-IN,en;q=0.9"}
 
 def clean(x):
-    return re.sub(r"\\s+"," ",str(x)).strip() if x is not None else None
+    return re.sub(r"\s+", " ", str(x)).strip() if x is not None else None
 
 def money(x):
-    if x is None: return None
-    m=re.search(r"(?:₹|INR|Rs\\.?|MRP)\\s*([\\d,]+(?:\\.\\d+)?)",str(x),re.I)
-    try: return float(m.group(1).replace(",","")) if m else None
-    except ValueError: return None
+    if x is None:
+        return None
+    s = str(x).strip()
+    m = re.search(r"(?:₹|INR|Rs\.?|MRP)?\s*([\d,]+(?:\.\d+)?)", s, re.I)
+    try:
+        return float(m.group(1).replace(",", "")) if m else None
+    except (ValueError, AttributeError):
+        return None
 
 def jsonld(soup):
     out=[]
@@ -42,7 +46,8 @@ def product(soup):
     return {}
 
 def label(text,names):
-    m=re.search(r"(?:%s)\\s*[:\\-]\\s*([^|]{2,160})"%"|".join(names),text,re.I)
+    pattern = r"(?:%s)\s*[:\-]\s*([^|]{2,160})" % "|".join(map(re.escape, names))
+    m = re.search(pattern, text, re.I)
     return clean(m.group(1)) if m else None
 
 def extract_product(url,html):
@@ -65,7 +70,7 @@ def extract_product(url,html):
     except: reviews=None
     brand=brand or label(text,["brand"]); manufacturer=manufacturer or label(text,["manufacturer","marketer"])
     rx=label(text,["prescription required","prescription"])
-    if rx: rx="yes" if re.search(r"\\b(yes|required)\\b",rx,re.I) else "no"
+    if rx: rx="yes" if re.search(r"\b(yes|required)\b",rx,re.I) else "no"
     return {"name":name,"brand":clean(brand),"manufacturer":clean(manufacturer),"price_inr":price,
       "mrp_inr":money(label(text,["MRP","maximum retail price"])),"currency":clean(offers.get("priceCurrency") if isinstance(offers,dict) else None) or "INR",
       "rating":rating,"review_count":reviews,"category":label(text,["category","product type"]),
