@@ -11,7 +11,7 @@ BASE=os.getenv("SOURCE_BASE","https://www.1mg.com")
 SOURCE=os.getenv("SOURCE_NAME","tata_1mg")
 MIN_ROWS=int(os.getenv("MIN_ROWS","5000"))
 MAX_ROWS=int(os.getenv("MAX_ROWS","10000"))
-DELAY=float(os.getenv("REQUEST_DELAY_SECONDS","1.0"))
+DELAY=float(os.getenv("REQUEST_DELAY_SECONDS","0.2"))
 OUT=os.getenv("OUT_CSV","data/medicines_dataset.csv")
 UA=os.getenv("SCRAPER_USER_AGENT","MedicineDatasetResearch/1.0")
 HEAD={"User-Agent":UA,"Accept-Language":"en-IN,en;q=0.9"}
@@ -80,18 +80,18 @@ def extract_product(url,html):
       "scraped_at":datetime.now(timezone.utc).isoformat()}
 
 def fetch(url):
-    for n in range(3):
+    for n in range(2):
         try:
-            r=requests.get(url,headers=HEAD,timeout=30); r.raise_for_status()
+            r=requests.get(url,headers=HEAD,timeout=15); r.raise_for_status()
             if "text/html" not in r.headers.get("content-type",""): raise ValueError("not HTML")
             return r.text
         except Exception:
             if n==2: raise
-            time.sleep(2**n)
+            time.sleep(1.0)
 
 def discover():
     robots_url = urljoin(BASE, "/robots.txt")
-    rr = requests.get(robots_url, headers=HEAD, timeout=30)
+    rr = requests.get(robots_url, headers=HEAD, timeout=15)
     rr.raise_for_status()
     rp = RobotFileParser()
     rp.parse(rr.text.splitlines())
@@ -119,7 +119,7 @@ def discover():
             return
         visited.add(sm)
         try:
-            x = requests.get(sm, headers=HEAD, timeout=30)
+            x = requests.get(sm, headers=HEAD, timeout=15)
             if x.status_code == 404:
                 return
             x.raise_for_status()
@@ -151,17 +151,17 @@ def discover():
     return list(dict.fromkeys(urls))
 
 def main():
-    urls=discover(); print("Discovered",len(urls))
+    urls=discover(); print("Discovered",len(urls), flush=True)
     rows=[]; seen=set()
     for i,u in enumerate(urls,1):
         try:
             row=extract_product(u,fetch(u))
             key=hashlib.sha256(u.encode()).hexdigest()[:16]
             if row and key not in seen: seen.add(key); rows.append(row)
-        except Exception as e: print("skip",u,e)
+        except Exception as e: print("skip",u,e, flush=True)
         time.sleep(DELAY)
         if len(rows)>=MAX_ROWS: break
-        if i%250==0: print("processed",i,"accepted",len(rows))
+        if i%100==0: print("processed",i,"accepted",len(rows), flush=True)
     if len(rows)<MIN_ROWS: raise SystemExit(f"Only {len(rows)} validated rows; need {MIN_ROWS}.")
     cols=["id","name","brand","manufacturer","price_inr","mrp_inr","currency","rating","review_count","category","salt_composition","dosage_form","pack_size","prescription_required","uses","source","source_url","scraped_at"]
     df=pd.DataFrame(rows); df.insert(0,"id",[f"MED{i:06d}" for i in range(1,len(df)+1)])
