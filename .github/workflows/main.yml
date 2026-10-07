@@ -35,7 +35,7 @@ jobs:
       REQUEST_DELAY_SECONDS: "1.0"
       SOURCE_BASE: "https://www.1mg.com"
       SOURCE_NAME: "tata_1mg"
-      OUT_CSV: "medicine-dataset/data/medicines_dataset.csv"
+      OUT_CSV: "data/medicines_dataset.csv"
       SCRAPER_USER_AGENT: "MedicineDatasetResearch/1.0"
 
     steps:
@@ -57,7 +57,7 @@ jobs:
 
       - name: Build 5K+ medicine CSV
         working-directory: medicine-dataset
-        run: python scripts/build_dataset.py --min-rows "$MIN_ROWS"
+        run: python scripts/build_dataset.py
 
       - name: Validate generated CSV
         run: |
