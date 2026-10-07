@@ -93,7 +93,8 @@ def discover():
     rr=requests.get(urljoin(BASE,"/robots.txt"),headers=HEAD,timeout=30); rr.raise_for_status()
     rp=RobotFileParser(); rp.parse(rr.text.splitlines())
     urls=[]
-    for sm in re.findall(r"(?im)^\\s*Sitemap:\\s*(\\S+)",rr.text):
+    seeds=re.findall(r"(?im)^\s*Sitemap:\s*(\S+)",rr.text) or [urljoin(BASE,"/sitemap.xml")]
+    for sm in seeds: re.findall(r"(?im)^\s*Sitemap:\s*(\S+)",rr.text):
         try:
             x=requests.get(sm,headers=HEAD,timeout=30); x.raise_for_status(); root=ET.fromstring(x.content)
             for u in root.iter():
