@@ -80,13 +80,19 @@ def extract_product(url,html):
       "scraped_at":datetime.now(timezone.utc).isoformat()}
 
 def fetch(url):
-    for n in range(2):
+    for n in range(6):
         try:
-            r=requests.get(url,headers=HEAD,timeout=15); r.raise_for_status()
+            r=requests.get(url,headers=HEAD,timeout=20)
+            if r.status_code == 429:
+                wait=min(30,2**n)
+                print("page rate limited",url,"waiting",wait,flush=True)
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
             if "text/html" not in r.headers.get("content-type",""): raise ValueError("not HTML")
             return r.text
         except Exception:
-            if n==2: raise
+            if n==5: raise
             time.sleep(1.0)
 
 def discover():
@@ -225,7 +231,7 @@ def page_enrich(url):
     if not out.get("category"):
         m=re.search(r"Action Class\s+(.+?)(?:Related lab tests|References|$)",text,re.I)
         if m: out["category"]=clean(m.group(1)).upper()
-    m=re.search(r"Contains\s+(.+?)\s+Marketer\s+",text,re.I)
+    m=re.search(r"Brand\s+(.+?)\s+(?:Composition|Contains|Marketer)\s+",text,re.I)\n    if m: out["brand"]=clean(m.group(1))\n    m=re.search(r"Contains\s+(.+?)\s+Marketer\s+",text,re.I)
     if m: out["salt_composition"]=clean(m.group(1))
     m=re.search(r"Marketer\s+(.+?)(?:\s+Storage\b|\s+Product information\b)",text,re.I)
     if m: out["manufacturer"]=clean(m.group(1))
