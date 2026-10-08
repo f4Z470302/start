@@ -231,7 +231,9 @@ def page_enrich(url):
     if not out.get("category"):
         m=re.search(r"Action Class\s+(.+?)(?:Related lab tests|References|$)",text,re.I)
         if m: out["category"]=clean(m.group(1)).upper()
-    m=re.search(r"Brand\s+(.+?)\s+(?:Composition|Contains|Marketer)\s+",text,re.I)\n    if m: out["brand"]=clean(m.group(1))\n    m=re.search(r"Contains\s+(.+?)\s+Marketer\s+",text,re.I)
+    m=re.search(r"Brand\s+(.+?)\s+(?:Composition|Contains|Marketer)\s+",text,re.I)
+    if m: out["brand"]=clean(m.group(1))
+    m=re.search(r"Contains\s+(.+?)\s+Marketer\s+",text,re.I)
     if m: out["salt_composition"]=clean(m.group(1))
     m=re.search(r"Marketer\s+(.+?)(?:\s+Storage\b|\s+Product information\b)",text,re.I)
     if m: out["manufacturer"]=clean(m.group(1))
