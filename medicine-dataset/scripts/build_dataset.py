@@ -164,10 +164,22 @@ def api_value(obj, keys):
 def discover_api_rows():
     rows=[]; session=requests.Session()
     for letter in "abcdefghijklmnopqrstuvwxyz":
-        for page in range(1,250):
-            endpoint=urljoin(BASE, "/pharmacy_api_gateway/v4/drug_skus/by_prefix?prefix_term="+letter+"&page="+str(page)+"&per_page=30")
+        for page in range(1,101):
+            endpoint=urljoin(BASE, "/pharmacy_api_gateway/v4/drug_skus/by_prefix?prefix_term="+letter+"&page="+str(page)+"&per_page=100")
             try:
-                r=session.get(endpoint,headers=HEAD,timeout=15); r.raise_for_status(); payload=r.json()
+                payload=None
+                for attempt in range(6):
+                    r=session.get(endpoint,headers=HEAD,timeout=20)
+                    if r.status_code == 429:
+                        wait=min(30,2**attempt)
+                        print("catalog rate limited",letter,page,"waiting",wait,flush=True)
+                        time.sleep(wait)
+                        continue
+                    r.raise_for_status()
+                    payload=r.json()
+                    break
+                if payload is None:
+                    print("catalog warning",letter,page,"rate limit exhausted",flush=True); break
             except Exception as e:
                 print("catalog warning",letter,page,e,flush=True); break
             skus=payload.get("data",{}).get("skus",[]) if isinstance(payload,dict) else []
@@ -194,7 +206,7 @@ def discover_api_rows():
                     "prescription_required":clean(rx),"uses":clean(api_value(sku,["uses","indications"])),
                     "source":SOURCE,"source_url":url,"scraped_at":datetime.now(timezone.utc).isoformat()})
                 if len(rows)>=MAX_ROWS: return list({r["source_url"]:r for r in rows}.values())
-            if page%10==0: print("catalog",letter,page,"rows",len(rows),flush=True)
+            if page%5==0: print("catalog",letter,page,"rows",len(rows),flush=True)
             time.sleep(DELAY)
     return list({r["source_url"]:r for r in rows}.values())
 
