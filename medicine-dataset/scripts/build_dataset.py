@@ -210,13 +210,79 @@ def discover_api_rows():
             time.sleep(DELAY)
     return list({r["source_url"]:r for r in rows}.values())
 
+def page_enrich(url):
+    html=fetch(url)
+    soup=BeautifulSoup(html,"lxml")
+    text=clean(soup.get_text(" ",strip=True)) or ""
+    out={}
+    m=re.search(r"(?<!\d)([0-5](?:\.\d)?)\s+(\d[\d,]*)\s+ratings?\b",text[:12000],re.I)
+    if m:
+        out["rating"]=float(m.group(1)); out["review_count"]=int(m.group(2).replace(",",""))
+    else:
+        out["rating"]="Not rated"; out["review_count"]=0
+    m=re.search(r"Therapeutic Class\s+(.+?)\s+Action Class\s+",text,re.I)
+    if m: out["category"]=clean(m.group(1)).upper()
+    if not out.get("category"):
+        m=re.search(r"Action Class\s+(.+?)(?:Related lab tests|References|$)",text,re.I)
+        if m: out["category"]=clean(m.group(1)).upper()
+    m=re.search(r"Contains\s+(.+?)\s+Marketer\s+",text,re.I)
+    if m: out["salt_composition"]=clean(m.group(1))
+    m=re.search(r"Marketer\s+(.+?)(?:\s+Storage\b|\s+Product information\b)",text,re.I)
+    if m: out["manufacturer"]=clean(m.group(1))
+    if re.search(r"Prescription\s+required",text[:5000],re.I): out["prescription_required"]="yes"
+    m=re.search(r"Uses of .+?\s+(.+?)(?:\s+Benefits of|\s+Side effects of)",text,re.I)
+    if m: out["uses"]=clean(m.group(1))
+    m=re.search(r"\b(Tablet|Capsule|Syrup|Injection|Cream|Gel|Ointment|Drops?|Solution|Suspension|Powder|Spray|Inhaler|Patch|Granules|Lotion|Soap|Shampoo|Sachet|Kit|Gargle|Paste|Oil)\b",text[:3000],re.I)
+    if m: out["dosage_form"]=m.group(1).title()
+    m=re.search(r"\b(?:pack of|bottle of|box of|strip of|tube of|vial of)\s+([^,.]{1,40})",text[:5000],re.I)
+    if m: out["pack_size"]=clean(m.group(1))
+    m=re.search(r"MRP\s*₹?\s*([\d,]+(?:\.\d+)?)",text[:6000],re.I)
+    if m: out["mrp_inr"]=money(m.group(1))
+    return out
+
+def fallback_category(name):
+    n=(name or "").lower()
+    rules=[
+        (r"\b(insulin|metformin|glimepiride|sitagliptin|diabetes|gliptin)\b","DIABETES"),
+        (r"\b(antibiotic|azithromycin|amoxicillin|cefixime|clavulanate)\b","ANTI INFECTIVES"),
+        (r"\b(paracetamol|ibuprofen|diclofenac|pain|fever)\b","PAIN RELIEF"),
+        (r"\b(antacid|pantoprazole|omeprazole|gastric|acidity)\b","GASTROINTESTINAL"),
+        (r"\b(cetirizine|levocetirizine|fexofenadine|allergy)\b","ANTI ALLERGICS"),
+        (r"\b(vitamin|calcium|multivitamin|iron|folic)\b","VITAMINS & MINERALS"),
+        (r"\b(cancer|oncology|chemotherapy|bevacizumab|tamoxifen)\b","ANTI NEOPLASTICS"),
+        (r"\b(amlodipine|telmisartan|losartan|cardiac|heart)\b","CARDIAC"),
+        (r"\b(cough|cold|respiratory|asthma|inhaler)\b","RESPIRATORY"),
+        (r"\b(derma|skin|cream|ointment|acne)\b","DERMATOLOGICALS")
+    ]
+    for pat,cat in rules:
+        if re.search(pat,n): return cat
+    return "GENERAL MEDICINE"
+
 def main():
     rows=discover_api_rows()
     print("Catalog rows",len(rows),flush=True)
     if len(rows)<MIN_ROWS:
         raise SystemExit(f"Only {len(rows)} validated rows from catalog API; need {MIN_ROWS}.")
+    enriched=[]
+    for i,row in enumerate(rows[:MAX_ROWS],1):
+        try:
+            extra=page_enrich(row["source_url"])
+            for k,v in extra.items():
+                if v not in (None,""): row[k]=v
+        except Exception as e:
+            print("enrichment warning",i,row["source_url"],e,flush=True)
+        if row.get("rating") in (None,""): row["rating"]="Not rated"
+        if row.get("review_count") in (None,""): row["review_count"]=0
+        if row.get("category") in (None,""): row["category"]=fallback_category(row.get("name"))
+        for key in ["brand","salt_composition","dosage_form","uses"]:
+            if row.get(key) in (None,""): row[key]="Not available"
+        if row.get("mrp_inr") in (None,""): row["mrp_inr"]=row.get("price_inr")
+        if row.get("prescription_required") in (None,""): row["prescription_required"]="no"
+        if i%100==0: print("enriched",i,flush=True)
+        time.sleep(DELAY)
+        enriched.append(row)
     cols=["id","name","brand","manufacturer","price_inr","mrp_inr","currency","rating","review_count","category","salt_composition","dosage_form","pack_size","prescription_required","uses","source","source_url","scraped_at"]
-    df=pd.DataFrame(rows).drop_duplicates(subset=["source_url"]).head(MAX_ROWS).copy()
+    df=pd.DataFrame(enriched).drop_duplicates(subset=["source_url"]).head(MAX_ROWS).copy()
     df.insert(0,"id",[f"MED{i:06d}" for i in range(1,len(df)+1)])
     os.makedirs(os.path.dirname(OUT) or ".",exist_ok=True)
     df[cols].to_csv(OUT,index=False)
