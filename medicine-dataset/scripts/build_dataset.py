@@ -150,22 +150,64 @@ def discover():
 
     return list(dict.fromkeys(urls))
 
+def api_value(obj, keys):
+    if not isinstance(obj, dict): return None
+    wanted={k.lower() for k in keys}
+    for k,v in obj.items():
+        if str(k).lower() in wanted and v not in (None,"",[],{}): return v
+    for v in obj.values():
+        if isinstance(v, dict):
+            got=api_value(v, keys)
+            if got not in (None,"",[],{}): return got
+    return None
+
+def discover_api_rows():
+    rows=[]; session=requests.Session()
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        for page in range(1,250):
+            endpoint=urljoin(BASE, "/pharmacy_api_gateway/v4/drug_skus/by_prefix?prefix_term="+letter+"&page="+str(page)+"&per_page=30")
+            try:
+                r=session.get(endpoint,headers=HEAD,timeout=15); r.raise_for_status(); payload=r.json()
+            except Exception as e:
+                print("catalog warning",letter,page,e,flush=True); break
+            skus=payload.get("data",{}).get("skus",[]) if isinstance(payload,dict) else []
+            if not skus: break
+            for sku in skus:
+                if not isinstance(sku,dict): continue
+                slug=api_value(sku,["slug","url"])
+                url=str(slug) if slug and str(slug).startswith("http") else urljoin(BASE,str(slug or ""))
+                if "/drugs/" not in url and "/otc/" not in url: continue
+                name=api_value(sku,["name","product_name","display_name"])
+                price=money(api_value(sku,["price","selling_price","discounted_price","sale_price"]))
+                mrp=money(api_value(sku,["mrp","maximum_retail_price","list_price"]))
+                if not name or not price or price<=0: continue
+                rx=api_value(sku,["prescription_required","rx_required","is_prescription_required"])
+                if isinstance(rx,bool): rx="yes" if rx else "no"
+                rows.append({"name":clean(name),"brand":clean(api_value(sku,["brand","brand_name"])),
+                    "manufacturer":clean(api_value(sku,["manufacturer","manufacturer_name","marketer"])),"price_inr":price,
+                    "mrp_inr":mrp,"currency":"INR","rating":api_value(sku,["rating","rating_value"]),
+                    "review_count":api_value(sku,["review_count","rating_count"]),
+                    "category":clean(api_value(sku,["category","category_name"])),
+                    "salt_composition":clean(api_value(sku,["salt_composition","salt","composition"])),
+                    "dosage_form":clean(api_value(sku,["dosage_form","form"])),
+                    "pack_size":clean(api_value(sku,["pack_size","pack","quantity"])),
+                    "prescription_required":clean(rx),"uses":clean(api_value(sku,["uses","indications"])),
+                    "source":SOURCE,"source_url":url,"scraped_at":datetime.now(timezone.utc).isoformat()})
+                if len(rows)>=MAX_ROWS: return list({r["source_url"]:r for r in rows}.values())
+            if page%10==0: print("catalog",letter,page,"rows",len(rows),flush=True)
+            time.sleep(DELAY)
+    return list({r["source_url"]:r for r in rows}.values())
+
 def main():
-    urls=discover(); print("Discovered",len(urls), flush=True)
-    rows=[]; seen=set()
-    for i,u in enumerate(urls,1):
-        try:
-            row=extract_product(u,fetch(u))
-            key=hashlib.sha256(u.encode()).hexdigest()[:16]
-            if row and key not in seen: seen.add(key); rows.append(row)
-        except Exception as e: print("skip",u,e, flush=True)
-        time.sleep(DELAY)
-        if len(rows)>=MAX_ROWS: break
-        if i%100==0: print("processed",i,"accepted",len(rows), flush=True)
-    if len(rows)<MIN_ROWS: raise SystemExit(f"Only {len(rows)} validated rows; need {MIN_ROWS}.")
+    rows=discover_api_rows()
+    print("Catalog rows",len(rows),flush=True)
+    if len(rows)<MIN_ROWS:
+        raise SystemExit(f"Only {len(rows)} validated rows from catalog API; need {MIN_ROWS}.")
     cols=["id","name","brand","manufacturer","price_inr","mrp_inr","currency","rating","review_count","category","salt_composition","dosage_form","pack_size","prescription_required","uses","source","source_url","scraped_at"]
-    df=pd.DataFrame(rows); df.insert(0,"id",[f"MED{i:06d}" for i in range(1,len(df)+1)])
-    os.makedirs(os.path.dirname(OUT) or ".",exist_ok=True); df[cols].to_csv(OUT,index=False)
-    print("Wrote",len(df),"rows")
+    df=pd.DataFrame(rows).drop_duplicates(subset=["source_url"]).head(MAX_ROWS).copy()
+    df.insert(0,"id",[f"MED{i:06d}" for i in range(1,len(df)+1)])
+    os.makedirs(os.path.dirname(OUT) or ".",exist_ok=True)
+    df[cols].to_csv(OUT,index=False)
+    print("Wrote",len(df),"rows",flush=True)
 
 if __name__=="__main__": main()
